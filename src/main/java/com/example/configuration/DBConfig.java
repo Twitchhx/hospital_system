@@ -3,7 +3,6 @@ package com.example.configuration;
 import com.arangodb.ArangoDB;
 import com.arangodb.entity.CollectionType;
 import com.arangodb.entity.EdgeDefinition;
-import com.arangodb.entity.GraphEntity;
 import com.arangodb.model.CollectionCreateOptions;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
@@ -16,6 +15,7 @@ public class DBConfig {
     private final ArangoDB arangoDB;
     private final String databaseName;
 
+    // Building the database and connecting to it using details from application.properties
     public DBConfig(
             @Value("${arangodb.host}") String host,
             @Value("${arangodb.port}") int port,
@@ -29,6 +29,7 @@ public class DBConfig {
                 .build();
         this.databaseName = databaseName;
 
+        // Making sure the documents and the appropriate edge are present
         if (!arangoDB.db(databaseName).collection("Hospital").exists()) {
             arangoDB.db(databaseName).createCollection("Hospital", new CollectionCreateOptions()
                     .type(CollectionType.DOCUMENT));
@@ -42,20 +43,16 @@ public class DBConfig {
                     .type(CollectionType.EDGES));
         }
 
-
         // Define the edge definition
         EdgeDefinition edgeDefinition = new EdgeDefinition()
                 .collection("isPatientIn")
                 .from("Patient")
                 .to("Hospital");
 
-        // Create the graph if it doesn't exist
+        // Creating the graph
         if (!arangoDB.db(databaseName).graph("Hospital_Patients").exists()) {
-            GraphEntity graph = arangoDB.db(databaseName)
+            arangoDB.db(databaseName)
                     .createGraph("Hospital_Patients", Collections.singletonList(edgeDefinition));
-            System.out.println("Graph created: " + graph.getName());
-        } else {
-            System.out.println("Graph already exists");
         }
 
     }
