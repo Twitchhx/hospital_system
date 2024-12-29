@@ -7,20 +7,22 @@ import io.micronaut.serde.annotation.Serdeable;
 @Introspected
 public class Patient {
     private String id;
+    private final String identification;
     private String name;
     private int age;
     private String gender;
     private String treatment;
 
-    public Patient(){
-
-    }
-
-    public Patient(String name, int age, String gender, String treatment) {
+    public Patient(String identification, String name, int age, String gender, String treatment) {
+        this.identification = identification;
         this.name = name;
         this.age = age;
         this.gender = gender;
         this.treatment = treatment;
+    }
+
+    public String getIdentification() {
+        return identification;
     }
 
     public String getId() {
