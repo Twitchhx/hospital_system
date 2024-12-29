@@ -11,6 +11,7 @@ import java.util.List;
 @Introspected
 public class Hospital {
     private String id;
+    private String identifier;
     private String name;
     private String location;
     private List<Patient> patients = new ArrayList<>();
@@ -19,7 +20,8 @@ public class Hospital {
 
     }
 
-    public Hospital(String name, String location, List<Patient> patients) {
+    public Hospital(String identifier, String name, String location, List<Patient> patients) {
+        this.identifier = identifier;
         this.name = name;
         this.location = location;
         this.patients = patients;
@@ -31,6 +33,14 @@ public class Hospital {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public String getIdentifier() {
+        return identifier;
+    }
+
+    public void setIdentifier(String identifier) {
+        this.identifier = identifier;
     }
 
     public String getName() {
