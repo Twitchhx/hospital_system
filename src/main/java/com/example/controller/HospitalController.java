@@ -3,7 +3,7 @@ package com.example.controller;
 import com.arangodb.ArangoCursor;
 import com.arangodb.entity.BaseDocument;
 import com.example.configuration.DBConfig;
-import com.example.exception.HospitalNotFoundException;
+import com.example.exception.*;
 import com.example.model.*;
 import io.micronaut.http.annotation.*;
 import java.io.IOException;
@@ -27,12 +27,12 @@ public class HospitalController {
     private List<Patient> mapPatients(List<Map<String, Object>> patientDocuments) {
         List<Patient> patients = new ArrayList<>();
         for (Map<String, Object> patientData : patientDocuments) {
-            Patient patient = new Patient();
+            Patient patient = new Patient((String) patientData.get("identification"),
+                    (String) patientData.get("name"),
+                    (Integer) patientData.get("age"),
+                    (String) patientData.get("gender"),
+                    (String) patientData.get("treatment"));
             patient.setId((String) patientData.get("_key"));
-            patient.setName((String) patientData.get("name"));
-            patient.setAge((Integer) patientData.get("age"));
-            patient.setGender((String) patientData.get("gender"));
-            patient.setTreatment((String) patientData.get("treatment"));
             patients.add(patient);
         }
         return patients;
@@ -44,6 +44,7 @@ public class HospitalController {
         for (Patient patient : updatedHospital.getPatients()) {
             BaseDocument patientDocument = new BaseDocument();
             patientDocument.addAttribute("_key", patient.getId());
+            patientDocument.addAttribute("identification", patient.getIdentification());
             patientDocument.addAttribute("name", patient.getName());
             patientDocument.addAttribute("age", patient.getAge());
             patientDocument.addAttribute("gender", patient.getGender());
@@ -56,7 +57,23 @@ public class HospitalController {
 
     @Post("/hospital")
     public String saveHospital(@Body Hospital hospital) {
+        // Check if hospital already exists by unique field identifier
+        String query = "FOR h IN Hospital FILTER h.identifier == @identifier RETURN h";
+        Map<String, Object> bindVars = Collections.singletonMap("identifier", hospital.getIdentifier());
+
+        try (ArangoCursor<BaseDocument> cursor = arangoDB.getArangoDB()
+                .db(databaseName)
+                .query(query, BaseDocument.class, bindVars, null)) {
+
+            if (cursor.hasNext()) {
+                return "Hospital with the same identifier already exists!";
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
         BaseDocument document = new BaseDocument();
+        document.addAttribute("identifier", hospital.getIdentifier());
         document.addAttribute("name", hospital.getName());
         document.addAttribute("location", hospital.getLocation());
         List<BaseDocument> patientDocuments = getBaseDocuments(hospital);
@@ -70,27 +87,47 @@ public class HospitalController {
     public String registerPatientInHospital(@PathVariable String patientId, @PathVariable String id) {
         Patient p = patientController.getPatientById(patientId);
         Hospital h = getHospitalById(id);
+
+        // Check if the patient is already registered in the hospital using AQL
+        String query = "FOR hp IN isPatientIn FILTER hp._from == @patientId AND hp._to == @hospitalId RETURN hp";
+        Map<String, Object> bindVars = new HashMap<>();
+        bindVars.put("patientId", "Patient/" + patientId);
+        bindVars.put("hospitalId", "Hospital/" + id);
+
+        try (ArangoCursor<BaseDocument> cursor = arangoDB.getArangoDB()
+                .db(databaseName)
+                .query(query, BaseDocument.class, bindVars, null)) {
+
+            // If a document is found, it means the patient is already registered
+            if (cursor.hasNext()) {
+                return "Patient is already registered in this hospital!";
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
         h.getPatients().add(p);
         updateHospital(id, h);
-        //HospitalPatients edge = new HospitalPatients("Patient/"+patientId, "Hospital/"+id);
         BaseDocument hpEdge = new BaseDocument();
         hpEdge.addAttribute("_from", "Patient/"+patientId);
         hpEdge.addAttribute("_to", "Hospital/"+id);
         arangoDB.getArangoDB().db(databaseName).collection("isPatientIn").insertDocument(hpEdge);
+
         return "Patient with ID " + patientId + " added in hospital with ID " + id +" successfully!";
     }
 
 
     @Get("/hospitals")
-    public List<Hospital> getAllHospitals() {
+    public List<Hospital> getAllHospitals() throws HospitalsNotFoundException {
         List<Hospital> hospitals = new ArrayList<>();
         try (ArangoCursor<BaseDocument> cursor = arangoDB.getArangoDB()
                 .db(databaseName)
-                .query("FOR p IN Hospital RETURN p", BaseDocument.class)) {
+                .query("FOR h IN Hospital RETURN h", BaseDocument.class)) {
 
             cursor.forEachRemaining(document -> {
                 Hospital hospital = new Hospital();
                 hospital.setId(document.getKey());
+                hospital.setIdentifier((String) document.getAttribute("identifier"));
                 hospital.setName((String) document.getAttribute("name"));
                 hospital.setLocation((String) document.getAttribute("location"));
 
@@ -108,6 +145,7 @@ public class HospitalController {
             throw new RuntimeException(e);
         }
 
+        if (hospitals.isEmpty()) { throw new HospitalsNotFoundException(); }
         return hospitals;
     }
 
@@ -121,6 +159,7 @@ public class HospitalController {
 
         Hospital retrievedHospital = new Hospital();
         retrievedHospital.setId(existingDocument.getKey());
+        retrievedHospital.setIdentifier((String) existingDocument.getAttribute("identifier"));
         retrievedHospital.setName((String) existingDocument.getAttribute("name"));
         retrievedHospital.setLocation((String) existingDocument.getAttribute("location"));
         Object patientsAttribute = existingDocument.getAttribute("patients");
@@ -135,7 +174,8 @@ public class HospitalController {
     }
 
     @Get("/hospital/{id}/patients")
-    public List<Patient> listPatientsOfHospital(@PathVariable String id){
+    public List<Patient> listPatientsOfHospital(@PathVariable String id) throws PatientsNotFoundException {
+        if (getHospitalById(id).getPatients().isEmpty()) { throw new PatientsNotFoundException(); }
         return getHospitalById(id).getPatients();
     }
 
@@ -150,6 +190,7 @@ public class HospitalController {
                 .orElseThrow(() -> new HospitalNotFoundException(id));
 
         // Update the document attributes
+        existingDocument.addAttribute("identifier", updatedHospital.getIdentifier());
         existingDocument.addAttribute("name", updatedHospital.getName());
         existingDocument.addAttribute("location", updatedHospital.getLocation());
 

@@ -3,7 +3,7 @@ package com.example.controller;
 import com.arangodb.ArangoCursor;
 import com.arangodb.entity.BaseDocument;
 import com.example.configuration.DBConfig;
-import com.example.exception.PatientNotFoundException;
+import com.example.exception.*;
 import com.example.model.Patient;
 import com.example.model.Hospital;
 import io.micronaut.http.annotation.*;
@@ -24,7 +24,22 @@ public class PatientController {
 
     @Post("/patient")
     public String savePatient(@Body Patient patient) {
+        // Check if patient already exists by unique field identification
+        String query = "FOR p IN Patient FILTER p.identification == @identification RETURN p";
+        Map<String, Object> bindVars = Collections.singletonMap("identification", patient.getIdentification());
+
+        try (ArangoCursor<BaseDocument> cursor = arangoDB.getArangoDB()
+                .db(databaseName)
+                .query(query, BaseDocument.class, bindVars, null)) {
+
+            if (cursor.hasNext()) {
+                return "Patient with the same identification already exists!";
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         BaseDocument document = new BaseDocument();
+        document.addAttribute("identification", patient.getIdentification());
         document.addAttribute("name", patient.getName());
         document.addAttribute("age", patient.getAge());
         document.addAttribute("gender", patient.getGender());
@@ -36,24 +51,25 @@ public class PatientController {
 
 
     @Get("/patients")
-    public List<Patient> getAllPatients(){
+    public List<Patient> getAllPatients() throws PatientsNotFoundException {
         List<Patient> patients = new ArrayList<>();
         try (ArangoCursor<BaseDocument> cursor = arangoDB.getArangoDB()
                 .db(databaseName)
                 .query("FOR p IN Patient RETURN p", BaseDocument.class)) {
 
             cursor.forEachRemaining(document -> {
-                Patient patient = new Patient();
+                Patient patient = new Patient((String) document.getAttribute("identification"),
+                        (String) document.getAttribute("name"),
+                        (Integer) document.getAttribute("age"),
+                        (String) document.getAttribute("gender"),
+                        (String) document.getAttribute("treatment"));
                 patient.setId(document.getKey());
-                patient.setName((String) document.getAttribute("name"));
-                patient.setGender((String) document.getAttribute("gender"));
-                patient.setAge((Integer) document.getAttribute("age"));
-                patient.setTreatment((String) document.getAttribute("treatment"));
                 patients.add(patient);
             });
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        if (patients.isEmpty()) { throw new PatientsNotFoundException(); }
 
         return patients;
     }
@@ -67,18 +83,18 @@ public class PatientController {
                         .getDocument(id, BaseDocument.class))
                 .orElseThrow(() -> new PatientNotFoundException(id));
 
-        Patient retrievedPatient = new Patient();
+        Patient retrievedPatient = new Patient((String) existingDocument.getAttribute("identification"),
+                (String) existingDocument.getAttribute("name"),
+                (Integer) existingDocument.getAttribute("age"),
+                (String) existingDocument.getAttribute("gender"),
+                (String) existingDocument.getAttribute("treatment"));
         retrievedPatient.setId(existingDocument.getKey());
-        retrievedPatient.setName((String) existingDocument.getAttribute("name"));
-        retrievedPatient.setAge((Integer) existingDocument.getAttribute("age"));
-        retrievedPatient.setGender((String) existingDocument.getAttribute("gender"));
-        retrievedPatient.setTreatment((String) existingDocument.getAttribute("treatment"));
 
         return retrievedPatient;
     }
 
     @Get("/patient/{patientId}/hospitals")
-    public List<Hospital> getHospitalsForPatient(@PathVariable String patientId) {
+    public List<Hospital> getHospitalsForPatient(@PathVariable String patientId) throws HospitalsNotFoundException {
         String patientDocId = "Patient/" + patientId; // Format the document ID for the patient
         List<Hospital> hospitals = new ArrayList<>();
 
@@ -101,16 +117,18 @@ public class PatientController {
                 if (hospitalDoc != null) {
                     Hospital hospital = new Hospital();
                     hospital.setId(hospitalDoc.getKey());
+                    hospital.setIdentifier((String) hospitalDoc.getAttribute("identifier"));
                     hospital.setName((String) hospitalDoc.getAttribute("name"));
                     hospital.setLocation((String) hospitalDoc.getAttribute("location"));
 
-                    // Map patients if needed, similar to other hospital retrieval logic
                     hospitals.add(hospital);
                 }
             });
         } catch (IOException e) {
             throw new RuntimeException("Error fetching hospitals for patient with ID: " + patientId, e);
         }
+
+        if (hospitals.isEmpty()) { throw new HospitalsNotFoundException(); }
 
         return hospitals;
     }
@@ -126,6 +144,7 @@ public class PatientController {
                 .orElseThrow(() -> new PatientNotFoundException(id));
 
         // Update the document attributes
+        existingDocument.addAttribute("identification", updatedPatient.getIdentification());
         existingDocument.addAttribute("name", updatedPatient.getName());
         existingDocument.addAttribute("age", updatedPatient.getAge());
         existingDocument.addAttribute("gender", updatedPatient.getGender());
@@ -173,7 +192,6 @@ public class PatientController {
         String query = "FOR doc IN isPatientIn FILTER doc._from == @patientId REMOVE doc IN isPatientIn";
         Map<String, Object> bindVars = Collections.singletonMap("patientId", "Patient/"+id);
 
-        // Execute the query
         try (ArangoCursor<Void> cursor = arangoDB.getArangoDB()
                 .db(databaseName)
                 .query(query, Void.class, bindVars, null)) {
