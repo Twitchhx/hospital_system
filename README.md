@@ -64,9 +64,10 @@ The system uses **JSON** for data communication and **Gradle** as the build tool
    ```bash
    ./gradlew run
    ```
+   The Micronaut application is running on port 8080.
 6. Use Docker to access the ArangoDB web interface:
    ```bash
-   docker run -d --name arangodb -e ARANGO_ROOT_PASSWORD=yourpassword -p 8529:8529 arangodb
+   docker run -d --name arangodb -e ARANGO_ROOT_PASSWORD=password -p 8529:8529 arangodb
    ```
    Open [http://localhost:8529](http://localhost:8529) in your browser and log in with the root password.
 
